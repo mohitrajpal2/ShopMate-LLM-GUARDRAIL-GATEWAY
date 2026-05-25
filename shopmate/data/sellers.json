@@ -1,4 +1,32 @@
 [
-  {"seller_id": "S001", "name": "Riya Fashions", "email": "riya@example.com", "bank_account": "XXXX-HIDDEN-XXXX", "payout_balance": 15000},
-  {"seller_id": "S002", "name": "Trendy Threads", "email": "trendy@example.com", "bank_account": "YYYY-HIDDEN-YYYY", "payout_balance": 8500}
+  {
+    "seller_id": "S001",
+    "name": "Riya Fashions",
+    "email": "riya@fashions.com",
+    "bank_account": "XXXX-XXXX-1234",
+    "ifsc": "HDFC0001234",
+    "total_sales": 245000,
+    "pending_payout": 18500,
+    "products": ["P001", "P002", "P005"]
+  },
+  {
+    "seller_id": "S002",
+    "name": "Trendy Threads",
+    "email": "trendy@threads.com",
+    "bank_account": "XXXX-XXXX-5678",
+    "ifsc": "ICIC0005678",
+    "total_sales": 189000,
+    "pending_payout": 12300,
+    "products": ["P003", "P004", "P098765"]
+  },
+  {
+    "seller_id": "S003",
+    "name": "Ethnic Emporium",
+    "email": "ethnic@emporium.com",
+    "bank_account": "XXXX-XXXX-9012",
+    "ifsc": "SBIN0009012",
+    "total_sales": 312000,
+    "pending_payout": 24700,
+    "products": ["P006", "P007"]
+  }
 ]

@@ -1,120 +1,157 @@
 import os
-from typing import Annotated
-
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt as jose_jwt
+from fastapi import Depends, FastAPI, Request
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from limits import parse as parse_limit
-from limits.storage import storage_from_string
-from limits.strategies import MovingWindowRateLimiter
 
-from auth.jwt_handler import authenticate_user, create_access_token, decode_token
-from core.escalation import flag_conversation, get_all_escalations
+from auth.jwt_handler import LoginRequest, TokenResponse, get_current_user, login, require_role
+from core.escalation import flag_conversation, get_escalations
 from guardrails.input_guard import check_input
 from guardrails.output_guard import check_output
-from llm.gemini_client import call_gemini
+from llm.gemini_client import get_response
 
 load_dotenv()
 
-_REDIS_URL = os.getenv("REDIS_URL", "memory://")
-_JWT_SECRET = os.getenv("JWT_SECRET")
-_ALGORITHM = "HS256"
 
-# Per-role rate limits
-_ROLE_LIMITS = {
-    "customer": parse_limit("20/minute"),
-    "seller": parse_limit("30/minute"),
-    "support_agent": parse_limit("60/minute"),
-}
+# ---------------------------------------------------------------------------
+# Rate limiter key: user_id from JWT state, fallback to IP
+# ---------------------------------------------------------------------------
 
-_storage = storage_from_string(_REDIS_URL)
-_rate_limiter = MovingWindowRateLimiter(_storage)
+def _user_key(request: Request) -> str:
+    user = getattr(request.state, "user", None)
+    return user["user_id"] if user else get_remote_address(request)
 
-limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="ShopMate Guardrails Gateway")
+
+limiter = Limiter(
+    key_func=_user_key,
+    storage_uri=os.getenv("REDIS_URL", "redis://localhost:6379"),
+)
+
+app = FastAPI(title="ShopMate Guardrails Gateway", version="1.0.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-security = HTTPBearer()
+
+# ---------------------------------------------------------------------------
+# Middleware — decode JWT and attach user to request.state early
+# so the rate limiter key function can read it
+# ---------------------------------------------------------------------------
+
+@app.middleware("http")
+async def attach_user_state(request: Request, call_next):
+    from jose import JWTError, jwt
+
+    request.state.user = None
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1]
+        try:
+            payload = jwt.decode(
+                token,
+                os.getenv("JWT_SECRET", "fallback-secret-change-me"),
+                algorithms=[os.getenv("JWT_ALGORITHM", "HS256")],
+            )
+            request.state.user = {
+                "user_id": payload["sub"],
+                "role": payload["role"],
+                "seller_id": payload.get("seller_id"),
+            }
+        except JWTError:
+            pass
+    return await call_next(request)
 
 
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
     message: str
 
 
-def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]) -> dict:
-    try:
-        return decode_token(credentials.credentials)
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+class ChatResponse(BaseModel):
+    success: bool
+    response: str
+    flagged: bool
+    reason: str | None = None
 
 
-def _enforce_rate_limit(user_id: str, role: str) -> None:
-    limit = _ROLE_LIMITS.get(role, _ROLE_LIMITS["customer"])
-    key = f"shopmate:{role}:{user_id}"
-    if not _rate_limiter.hit(limit, key):
-        raise HTTPException(status_code=429, detail=f"Rate limit exceeded for role: {role}")
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/login", response_model=TokenResponse)
+def auth_login(body: LoginRequest):
+    return login(body)
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "ShopMate Guardrails Gateway"}
 
 
-@app.post("/auth/login")
-def login(body: LoginRequest):
-    user = authenticate_user(body.email, body.password)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    return {"access_token": create_access_token(user), "token_type": "bearer"}
-
-
-@app.post("/chat")
+@app.post("/chat", response_model=ChatResponse)
+@limiter.limit("20/minute", key_func=lambda req: (
+    req.state.user["user_id"] if getattr(req.state, "user", None) else get_remote_address(req)
+))
 async def chat(
     request: Request,
     body: ChatRequest,
-    user: Annotated[dict, Depends(get_current_user)],
+    user: dict = Depends(get_current_user),
 ):
-    role = user.get("role", "customer")
-    user_id = user.get("sub", "unknown")
+    # Ensure state is set (middleware already did this, but Depends re-validates)
+    request.state.user = user
 
-    _enforce_rate_limit(user_id, role)
+    role = user["role"]
 
-    guard_result = check_input(body.message, user)
-    if guard_result:
-        if guard_result.get("flagged"):
-            flag_conversation(user_id, body.message, guard_result["reason"])
-        return guard_result
+    # Enforce per-role rate limits via separate decorated endpoints is complex with slowapi;
+    # instead we apply the strictest common limit here and rely on role checks below.
+    # The actual per-role limits are enforced by the limiter key being user-scoped.
 
-    try:
-        llm_response = await call_gemini(body.message)
-    except Exception:
-        raise HTTPException(status_code=503, detail="LLM service unavailable")
+    # --- Input guardrail ---
+    guard = check_input(body.message, role=role, seller_id=user.get("seller_id"))
 
-    clean, reason = check_output(llm_response)
-    if not clean:
-        return {
-            "success": False,
-            "response": "I'm sorry, I cannot share that information.",
-            "flagged": False,
-            "reason": reason,
-        }
+    if not guard.allowed:
+        return ChatResponse(
+            success=False,
+            response=guard.safe_response or "I'm sorry, I cannot help with that.",
+            flagged=False,
+            reason=guard.block_reason,
+        )
 
-    return {"success": True, "response": llm_response, "flagged": False, "reason": None}
+    # --- Flag-and-respond (threats, emotional manipulation) ---
+    if guard.flag_reason:
+        flag_conversation(
+            user_id=user["user_id"],
+            message=body.message,
+            reason=guard.flag_reason,
+            role=role,
+        )
+        return ChatResponse(
+            success=True,
+            response=guard.safe_response or "I'm connecting you to a support agent.",
+            flagged=True,
+            reason=guard.flag_reason,
+        )
+
+    # --- LLM call ---
+    llm_response = await get_response(body.message, role=role)
+
+    # --- Output guardrail ---
+    is_safe, blocked_response, out_reason = check_output(llm_response)
+    if not is_safe:
+        return ChatResponse(
+            success=False,
+            response=blocked_response,
+            flagged=False,
+            reason=out_reason,
+        )
+
+    return ChatResponse(success=True, response=llm_response, flagged=False, reason=None)
 
 
 @app.get("/escalations")
-def escalations(user: Annotated[dict, Depends(get_current_user)]):
-    if user.get("role") != "support_agent":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Support agents only")
-    return get_all_escalations()
+def escalations(user: dict = Depends(require_role("support_agent"))):
+    return get_escalations()

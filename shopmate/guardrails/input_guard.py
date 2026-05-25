@@ -1,116 +1,126 @@
-from .intent_detector import detect_intent
-from .role_guard import check_role_topic, scope_seller_data
+import re
+from dataclasses import dataclass
+from typing import Optional
 
-# Financial mutation keywords for Problem 7
-_FINANCIAL_KEYWORDS = [
-    "bank account", "payout", "change account", "update account",
-    "redirect payment", "financial account", "change bank",
-]
+from guardrails.intent_detector import detect_intent
+from guardrails.role_guard import is_competitor_query, is_financial_mutation_request
 
-# Inventory/supply keywords for Problem 6
+
+@dataclass
+class GuardResult:
+    allowed: bool
+    block_reason: Optional[str] = None
+    flag_reason: Optional[str] = None
+    safe_response: Optional[str] = None
+
+
 _INVENTORY_KEYWORDS = [
-    "low on stock", "out of stock", "stock level", "demand this week",
-    "highest demand", "supply chain", "inventory", "demand trend",
+    "low on stock", "out of stock", "stock level", "inventory",
+    "demand trend", "highest demand", "supply chain", "restock",
+    "how many left", "stock count",
 ]
 
-# Discount code pattern for Problem 2 (input side)
 _DISCOUNT_INPUT_KEYWORDS = [
-    "discount code", "promo code", "coupon code", "active codes",
-    "list all codes", "what codes",
+    "discount code", "promo code", "coupon code", "voucher code",
+    "active codes", "promotion code", "offer code",
 ]
 
-_BLOCK_RESPONSES = {
-    "price_manipulation": "Price changes require verification. Please contact support.",
-    "return_fraud_intent": "I can share our return policy. Returns are subject to quality verification.",
-    "inventory_extraction": "Stock availability is shown on each product page. I can't share inventory data.",
-    "competitor_spying": "You can only access your own store data.",
-    "seller_impersonation": "Financial account changes must be done through the verified seller portal with 2FA.",
-    "discount_fishing": "I can't share internal promotion details. Check the offers page.",
-}
 
-_ESCALATION_RESPONSES = {
-    "threat_urgency": "I understand your concern. I'm connecting you to a senior support agent who can help resolve this.",
-    "emotional_manipulation": "I'm really sorry to hear this. Here's how to raise a return request: shopmate.com/returns. I'm also flagging this for a support agent to follow up with you personally.",
-}
-
-
-def check_input(message: str, user: dict) -> dict | None:
+def check_input(message: str, role: str, seller_id: Optional[str] = None) -> GuardResult:
     """
-    Returns a guardrail result dict if the input should be blocked or escalated,
-    or None if the input is clean and should proceed to the LLM.
-
-    Result shape: {"success": bool, "response": str, "flagged": bool, "reason": str}
+    Runs all input guardrails in order. Returns on first match.
+    Pipeline: financial mutation → competitor query → semantic intent → keyword checks
     """
-    role = user["role"]
     msg_lower = message.lower()
 
-    # --- Problem 7: Financial mutation (block before anything else) ---
-    if any(kw in msg_lower for kw in _FINANCIAL_KEYWORDS):
-        return {
-            "success": False,
-            "response": _BLOCK_RESPONSES["seller_impersonation"],
-            "flagged": False,
-            "reason": "Blocked action: financial mutation in chat",
-        }
+    # Problem 7 — Seller impersonation / financial mutation (all roles)
+    if is_financial_mutation_request(message):
+        return GuardResult(
+            allowed=False,
+            block_reason="Financial account changes blocked in chat",
+            safe_response="Financial account changes must be done through the verified seller portal with 2FA.",
+        )
 
-    # --- Problem 6: Inventory extraction keywords ---
-    if any(kw in msg_lower for kw in _INVENTORY_KEYWORDS):
-        return {
-            "success": False,
-            "response": _BLOCK_RESPONSES["inventory_extraction"],
-            "flagged": False,
-            "reason": "Blocked topic: inventory levels",
-        }
+    # Problem 3 — Seller competitor spying
+    if role == "seller" and is_competitor_query(message):
+        return GuardResult(
+            allowed=False,
+            block_reason="Competitor data query blocked",
+            safe_response="You can only access your own store data.",
+        )
 
-    # --- Problem 2: Discount code fishing (input side) ---
-    if any(kw in msg_lower for kw in _DISCOUNT_INPUT_KEYWORDS):
-        return {
-            "success": False,
-            "response": _BLOCK_RESPONSES["discount_fishing"],
-            "flagged": False,
-            "reason": "Blocked topic: internal discount codes",
-        }
-
-    # --- Role-based topic/action blocking ---
-    allowed, reason = check_role_topic(message, role)
-    if not allowed:
-        return {
-            "success": False,
-            "response": "I'm sorry, I cannot help with that.",
-            "flagged": False,
-            "reason": reason,
-        }
-
-    # --- Seller competitor scoping (Problem 3) ---
-    if role == "seller":
-        seller_id = user.get("seller_id", "")
-        allowed, reason = scope_seller_data(seller_id, message)
-        if not allowed:
-            return {
-                "success": False,
-                "response": _BLOCK_RESPONSES["competitor_spying"],
-                "flagged": False,
-                "reason": reason,
-            }
-
-    # --- Semantic intent detection (Problems 1, 4, 5, 8) ---
+    # Semantic intent detection
     intent = detect_intent(message)
 
-    if intent in _BLOCK_RESPONSES:
-        return {
-            "success": False,
-            "response": _BLOCK_RESPONSES[intent],
-            "flagged": False,
-            "reason": f"Blocked intent: {intent}",
-        }
+    if intent == "price_manipulation":
+        return GuardResult(
+            allowed=False,
+            block_reason="Price manipulation attempt detected",
+            safe_response="Price changes require verification. Please contact support.",
+        )
 
-    if intent in _ESCALATION_RESPONSES:
-        if intent in ("threat_urgency", "emotional_manipulation"):
-            return {
-                "success": True,
-                "response": _ESCALATION_RESPONSES[intent],
-                "flagged": True,
-                "reason": f"{intent.replace('_', ' ').title()} detected",
-            }
+    if intent == "return_fraud":
+        return GuardResult(
+            allowed=False,
+            block_reason="Return fraud intent detected",
+            safe_response="I can share our return policy. Returns are subject to quality verification.",
+        )
 
-    return None
+    if intent == "inventory_extraction":
+        return GuardResult(
+            allowed=False,
+            block_reason="Inventory data extraction blocked",
+            safe_response="Stock availability is shown on each product page. I can't share inventory data.",
+        )
+
+    if intent == "competitor_spying":
+        return GuardResult(
+            allowed=False,
+            block_reason="Competitor data query blocked",
+            safe_response="You can only access your own store data.",
+        )
+
+    if intent == "threat_urgency":
+        return GuardResult(
+            allowed=True,
+            flag_reason="Threat or urgency social engineering detected",
+            safe_response="I understand your concern. I'm connecting you to a senior support agent who can help resolve this.",
+        )
+
+    if intent == "emotional_manipulation":
+        return GuardResult(
+            allowed=True,
+            flag_reason="Emotional manipulation detected",
+            safe_response="I'm really sorry to hear this. Here's how to raise a return request at shopmate.com/returns. I'm also flagging this for a support agent to follow up with you personally.",
+        )
+
+    if intent == "seller_impersonation":
+        return GuardResult(
+            allowed=False,
+            block_reason="Seller impersonation / financial mutation blocked",
+            safe_response="Financial account changes must be done through the verified seller portal with 2FA.",
+        )
+
+    if intent == "discount_fishing":
+        return GuardResult(
+            allowed=False,
+            block_reason="Internal discount code request blocked",
+            safe_response="I can't share internal promotion details. Check the offers page.",
+        )
+
+    # Keyword fallbacks for inventory and discount fishing
+    if any(kw in msg_lower for kw in _INVENTORY_KEYWORDS):
+        return GuardResult(
+            allowed=False,
+            block_reason="Inventory data extraction blocked",
+            safe_response="Stock availability is shown on each product page. I can't share inventory data.",
+        )
+
+    if any(kw in msg_lower for kw in _DISCOUNT_INPUT_KEYWORDS):
+        return GuardResult(
+            allowed=False,
+            block_reason="Internal discount code request blocked",
+            safe_response="I can't share internal promotion details. Check the offers page.",
+        )
+
+    return GuardResult(allowed=True)

@@ -40,7 +40,8 @@ Success = every one of the 8 business problems listed in Section 4 is blocked co
 | Policy Config | YAML | Human readable, non-engineers can edit |
 | Mock Data | JSON files | Simulates product catalog + orders |
 | Testing | pytest | Standard |
-| Container | Docker | Single container, no compose needed |
+| Package Manager | uv | Fast, modern Python package manager |
+| Container | Docker | External services only (Redis) |
 
 **Constraints:**
 - No GraphQL. REST only.
@@ -49,6 +50,24 @@ Success = every one of the 8 business problems listed in Section 4 is blocked co
 - sentence-transformers model downloads once and is cached. No repeated downloads.
 - JWT secret stored in `.env`. Never hardcoded.
 - All role checks happen server-side. Never trust the client.
+
+**Docker usage:**
+- v1 (now): Docker is used exclusively for external infrastructure — **Redis** runs in Docker, the FastAPI app connects to it at `localhost:6379`.
+- v2 (future): The FastAPI app will also be containerized and the full stack will run via Docker Compose.
+- The FastAPI app itself runs locally via `uv` for now. It is NOT containerized in v1.
+- Rule for v1: if it's a Python library, it runs in-process. If it's a background service, it runs in Docker.
+
+**Local dev setup:**
+```bash
+# 1. Start Redis in Docker
+docker run -d --name shopmate-redis -p 6379:6379 redis:7-alpine
+
+# 2. Install dependencies with uv
+uv sync
+
+# 3. Run the app
+uv run uvicorn main:app --reload
+```
 
 ---
 
@@ -398,8 +417,9 @@ shopmate/
 ├── tests/
 │   ├── __init__.py
 │   └── test_shopmate_guardrails.py  # All 8 problems tested
-├── Dockerfile
-├── requirements.txt
+├── docker-compose.yml               # Redis only
+├── pyproject.toml                   # uv-managed dependencies (replaces requirements.txt)
+├── uv.lock                          # auto-generated lockfile, commit this
 └── .env
 ```
 
