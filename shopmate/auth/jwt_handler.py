@@ -1,16 +1,14 @@
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
+import bcrypt
+from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
-
-from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
@@ -19,7 +17,6 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
 _USERS_PATH = Path(__file__).parent.parent / "data" / "users.json"
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _bearer = HTTPBearer()
 
 
@@ -51,7 +48,7 @@ def create_token(user: dict) -> str:
 def login(request: LoginRequest) -> TokenResponse:
     users = _load_users()
     user = next((u for u in users if u["email"] == request.email), None)
-    if not user or not _pwd_ctx.verify(request.password, user["password_hash"]):
+    if not user or not bcrypt.checkpw(request.password.encode(), user["password_hash"].encode()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return TokenResponse(access_token=create_token(user))
 
