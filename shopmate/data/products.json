@@ -1,0 +1,7 @@
+[
+  {"product_id": "P001", "name": "Women's Floral Kurta", "category": "women", "price": 1299, "stock": 45, "seller_id": "S001", "demand_trend": "high"},
+  {"product_id": "P002", "name": "Men's Slim Fit Jeans", "category": "men", "price": 1899, "stock": 30, "seller_id": "S001", "demand_trend": "medium"},
+  {"product_id": "P003", "name": "Women's Embroidered Dupatta", "category": "women", "price": 599, "stock": 5, "seller_id": "S002", "demand_trend": "low"},
+  {"product_id": "P004", "name": "Men's Casual Shirt", "category": "men", "price": 999, "stock": 60, "seller_id": "S002", "demand_trend": "high"},
+  {"product_id": "P005", "name": "Women's Anarkali Dress", "category": "women", "price": 2499, "stock": 12, "seller_id": "S001", "demand_trend": "medium"}
+]

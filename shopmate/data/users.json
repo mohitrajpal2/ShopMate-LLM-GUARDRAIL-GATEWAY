@@ -1,0 +1,7 @@
+[
+  {"user_id": "C001", "name": "Priya Sharma", "email": "priya@example.com", "password_hash": "$2b$12$KIXbHqMq1234567890abcdefghijklmnopqrstuvwxyz012345", "role": "customer"},
+  {"user_id": "C002", "name": "Amit Verma", "email": "amit@example.com", "password_hash": "$2b$12$KIXbHqMq1234567890abcdefghijklmnopqrstuvwxyz012345", "role": "customer"},
+  {"user_id": "S001", "name": "Riya Fashions", "email": "riya@example.com", "password_hash": "$2b$12$KIXbHqMq1234567890abcdefghijklmnopqrstuvwxyz012345", "role": "seller", "seller_id": "S001"},
+  {"user_id": "S002", "name": "Trendy Threads", "email": "trendy@example.com", "password_hash": "$2b$12$KIXbHqMq1234567890abcdefghijklmnopqrstuvwxyz012345", "role": "seller", "seller_id": "S002"},
+  {"user_id": "A001", "name": "Support Agent 1", "email": "support@example.com", "password_hash": "$2b$12$KIXbHqMq1234567890abcdefghijklmnopqrstuvwxyz012345", "role": "support_agent"}
+]

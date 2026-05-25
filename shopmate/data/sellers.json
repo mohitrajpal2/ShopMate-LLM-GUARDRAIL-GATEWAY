@@ -1,0 +1,4 @@
+[
+  {"seller_id": "S001", "name": "Riya Fashions", "email": "riya@example.com", "bank_account": "XXXX-HIDDEN-XXXX", "payout_balance": 15000},
+  {"seller_id": "S002", "name": "Trendy Threads", "email": "trendy@example.com", "bank_account": "YYYY-HIDDEN-YYYY", "payout_balance": 8500}
+]

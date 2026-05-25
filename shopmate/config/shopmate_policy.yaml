@@ -1,0 +1,57 @@
+roles:
+  customer:
+    rate_limit: 20
+    allowed_topics:
+      - products
+      - orders
+      - returns
+      - sizing
+      - availability
+    blocked_topics:
+      - competitor pricing
+      - internal discounts
+      - inventory levels
+      - seller data
+
+  seller:
+    rate_limit: 30
+    allowed_topics:
+      - my products
+      - my sales
+      - my payouts
+      - my listings
+    blocked_topics:
+      - competitor sellers
+      - platform wide data
+      - customer personal data
+      - other seller pricing
+
+  support_agent:
+    rate_limit: 60
+    allowed_topics:
+      - all orders
+      - seller data
+      - customer complaints
+    blocked_actions:
+      - financial modifications
+      - payout changes
+
+internal_data:
+  never_expose:
+    - discount_codes
+    - stock_levels
+    - demand_trends
+    - seller_bank_details
+    - internal_pricing_rules
+
+escalation:
+  flag_and_respond:
+    - emotional_manipulation
+    - threats
+    - urgency_social_engineering
+  block_only:
+    - price_manipulation
+    - discount_fishing
+    - inventory_extraction
+    - seller_impersonation
+    - return_fraud_intent
