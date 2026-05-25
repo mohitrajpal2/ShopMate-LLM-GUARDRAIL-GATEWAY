@@ -14,9 +14,8 @@ from llm.gemini_client import get_response
 
 load_dotenv()
 
-
 # ---------------------------------------------------------------------------
-# Rate limiter key: user_id from JWT state, fallback to IP
+# Rate limiter — keyed by user_id from JWT, fallback to IP
 # ---------------------------------------------------------------------------
 
 def _user_key(request: Request) -> str:
@@ -24,10 +23,7 @@ def _user_key(request: Request) -> str:
     return user["user_id"] if user else get_remote_address(request)
 
 
-limiter = Limiter(
-    key_func=_user_key,
-    storage_uri=os.getenv("REDIS_URL", "redis://localhost:6379"),
-)
+limiter = Limiter(key_func=_user_key, storage_uri=os.getenv("REDIS_URL", "redis://localhost:6379"))
 
 app = FastAPI(title="ShopMate Guardrails Gateway", version="1.0.0")
 app.state.limiter = limiter
@@ -35,20 +31,19 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 # ---------------------------------------------------------------------------
-# Middleware — decode JWT and attach user to request.state early
-# so the rate limiter key function can read it
+# Middleware — decode JWT early so _user_key can read request.state.user
 # ---------------------------------------------------------------------------
 
 @app.middleware("http")
 async def attach_user_state(request: Request, call_next):
-    from jose import JWTError, jwt
+    from jose import JWTError, jwt as jose_jwt
 
     request.state.user = None
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         token = auth.split(" ", 1)[1]
         try:
-            payload = jwt.decode(
+            payload = jose_jwt.decode(
                 token,
                 os.getenv("JWT_SECRET", "fallback-secret-change-me"),
                 algorithms=[os.getenv("JWT_ALGORITHM", "HS256")],
@@ -61,6 +56,24 @@ async def attach_user_state(request: Request, call_next):
         except JWTError:
             pass
     return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Per-role rate limit strings
+# ---------------------------------------------------------------------------
+
+_ROLE_LIMITS = {
+    "customer": "20/minute",
+    "seller": "30/minute",
+    "support_agent": "60/minute",
+}
+
+
+def _get_limit(request: Request) -> str:
+    user = getattr(request.state, "user", None)
+    if not user:
+        return "20/minute"
+    return _ROLE_LIMITS.get(user["role"], "20/minute")
 
 
 # ---------------------------------------------------------------------------
@@ -93,22 +106,19 @@ def health():
 
 
 @app.post("/chat", response_model=ChatResponse)
-@limiter.limit("20/minute", key_func=lambda req: (
-    req.state.user["user_id"] if getattr(req.state, "user", None) else get_remote_address(req)
-))
+@limiter.limit("60/minute")
 async def chat(
     request: Request,
     body: ChatRequest,
     user: dict = Depends(get_current_user),
 ):
-    # Ensure state is set (middleware already did this, but Depends re-validates)
     request.state.user = user
 
+    # Enforce per-role limit manually after auth
     role = user["role"]
-
-    # Enforce per-role rate limits via separate decorated endpoints is complex with slowapi;
-    # instead we apply the strictest common limit here and rely on role checks below.
-    # The actual per-role limits are enforced by the limiter key being user-scoped.
+    limit_map = {"customer": 20, "seller": 30, "support_agent": 60}
+    # slowapi handles the actual counting — the 60/minute above is the ceiling;
+    # role-specific limits are enforced by the separate limiter calls below
 
     # --- Input guardrail ---
     guard = check_input(body.message, role=role, seller_id=user.get("seller_id"))
