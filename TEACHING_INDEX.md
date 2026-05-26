@@ -50,7 +50,7 @@ completed = true
 - What 401 vs 403 means and when each is returned
 
 ```
-completed = false
+completed = true
 ```
 
 ---

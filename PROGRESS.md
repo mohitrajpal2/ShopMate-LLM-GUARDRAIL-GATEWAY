@@ -7,8 +7,8 @@ Update it at the end of every session before closing.
 
 ## Current Status
 
-**Last session:** Module 2 — main.py and FastAPI basics
-**Next session starts at:** Module 3 — Authentication (`auth/jwt_handler.py`)
+**Last session:** Module 3 — Authentication (`auth/jwt_handler.py`)
+**Next session starts at:** Module 4 — Policy Engine (`guardrails/policy_engine.py`)
 
 ---
 
@@ -16,6 +16,7 @@ Update it at the end of every session before closing.
 
 | Module | Topic | Date Completed | Key Takeaway |
 |--------|-------|----------------|--------------|
+| Module 3 | Authentication (`auth/jwt_handler.py`) | Day 1 | JWT structure, bcrypt hashing, create_token(), get_current_user(), require_role(), 401 vs 403 |
 | Module 2 | Project Structure & Entry Point (`main.py`) | Day 1 | FastAPI, endpoints, Depends(), middleware, request.state, the /chat pipeline order |
 | Module 1 | How a Request Flows Through the System | Day 1 | 4 stages: Auth → Input Guard → LLM → Output Guard. Block vs Flag+Respond. main.py is the conductor. |
 | — | Built the full project from spec | Day 1 | 14 files, 8 guardrails, FastAPI + Gemini + ChromaDB + Presidio |
@@ -28,7 +29,6 @@ Update it at the end of every session before closing.
 
 ## Pending Topics
 
-- Module 3 — JWT auth and bcrypt
 - Module 4 — Policy engine and YAML
 - Module 5 — Intent detection with ChromaDB + sentence-transformers
 - Module 6 — Input guard pipeline
