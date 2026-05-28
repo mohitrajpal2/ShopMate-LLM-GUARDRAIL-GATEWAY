@@ -23,7 +23,7 @@ def _user_key(request: Request) -> str:
     return user["user_id"] if user else get_remote_address(request)
 
 
-limiter = Limiter(key_func=_user_key, storage_uri=os.getenv("REDIS_URL", "redis://localhost:6379"))
+limiter = Limiter(key_func=_user_key, storage_uri=os.getenv("REDIS_URL", "memory://"))
 
 app = FastAPI(title="ShopMate Guardrails Gateway", version="1.0.0")
 app.state.limiter = limiter
