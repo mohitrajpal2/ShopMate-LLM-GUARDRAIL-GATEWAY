@@ -93,7 +93,7 @@ def _seed_collection() -> None:
     _seeded = True
 
 
-def detect_intent(message: str, threshold: float = 0.82) -> str | None:
+def detect_intent(message: str, threshold: float = 0.75) -> str | None:
     """Returns the matched intent name if similarity exceeds threshold, else None."""
     _seed_collection()
     results = _collection.query(query_texts=[message], n_results=1)
